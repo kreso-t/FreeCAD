@@ -1,4 +1,5 @@
 import FreeCAD
+import FreeCADGui
 import Mesh
 import Part
 import Path
@@ -8,6 +9,7 @@ import PathScripts.PathLog as PathLog
 import PathSimulator
 import math
 import os
+import time
 
 from FreeCAD import Vector, Base
 
@@ -50,13 +52,17 @@ class PathSimulation:
         self.simperiod = 20
         self.accuracy = 0.1
         self.resetSimulation = False
+        self.lastGuiUpdateTime = time.time()
+        self.guiUpdateInterval=0.04 # 25 frames per sec
 
     def Connect(self, but, sig):
         QtCore.QObject.connect(but, QtCore.SIGNAL("clicked()"), sig)
 
-    def UpdateProgress(self):
-        if self.numCommands > 0:
+    def UpdateProgress(self, force=False):
+        if self.numCommands > 0 and (force or (time.time() - self.lastGuiUpdateTime > self.guiUpdateInterval)):
+            self.lastGuiUpdateTime=time.time()
             self.taskForm.form.progressBar.setValue(self.iprogress * 100 / self.numCommands)
+            FreeCADGui.updateGui() #should add a bit more responsiveness
 
     def Activate(self):
         self.initdone = False
@@ -247,7 +253,8 @@ class PathSimulation:
         # for cmd in job.Path.Commands:
         if cmd.Name in ['G0', 'G1', 'G2', 'G3']:
             self.curpos = self.voxSim.ApplyCommand(self.curpos, cmd)
-            if not self.disableAnim:
+            if not self.disableAnim and time.time() - self.lastGuiUpdateTime > self.guiUpdateInterval:
+                self.lastGuiUpdateTime=time.time()
                 self.cutTool.Placement = self.curpos  # FreeCAD.Placement(self.curpos, self.stdrot)
                 (self.cutMaterial.Mesh, self.cutMaterialIn.Mesh) = self.voxSim.GetResultMesh()
         if cmd.Name in ['G81', 'G82', 'G83']:
@@ -260,7 +267,8 @@ class PathSimulation:
             extendcommands.append(Path.Command('G1', {"X": cmd.x, "Y": cmd.y, "Z": cmd.r}))
             for ecmd in extendcommands:
                 self.curpos = self.voxSim.ApplyCommand(self.curpos, ecmd)
-                if not self.disableAnim:
+                if not self.disableAnim and time.time() - self.lastGuiUpdateTime > self.guiUpdateInterval:
+                    self.lastGuiUpdateTime=time.time()
                     self.cutTool.Placement = self.curpos  # FreeCAD.Placement(self.curpos, self.stdrot)
                     (self.cutMaterial.Mesh, self.cutMaterialIn.Mesh) = self.voxSim.GetResultMesh()
         self.icmd += 1
@@ -270,7 +278,10 @@ class PathSimulation:
             # self.cutMaterial.Shape = self.stock.removeSplitter()
             self.ioperation += 1
             if self.ioperation >= len(self.activeOps):
+                self.cutTool.Placement = self.curpos  # FreeCAD.Placement(self.curpos, self.stdrot)
+                (self.cutMaterial.Mesh, self.cutMaterialIn.Mesh) = self.voxSim.GetResultMesh()
                 self.EndSimulation()
+                self.UpdateProgress(True)
                 return
             else:
                 self.SetupOperation(self.ioperation)
@@ -453,8 +464,10 @@ class PathSimulation:
 
     def onSpeedBarChange(self):
         form = self.taskForm.form
-        self.simperiod = 1000 / form.sliderSpeed.value()
-        form.labelGPerSec.setText(str(form.sliderSpeed.value()) + " G/s")
+        # logarithmic scale for speed
+        gPerSec = int(math.pow(10,form.sliderSpeed.value()/12.5))        
+        self.simperiod = 1000 / gPerSec
+        form.labelGPerSec.setText(str(gPerSec) + " G/s")
         # if (self.timer.isActive()):
         self.timer.setInterval(self.simperiod)
 
@@ -495,7 +508,7 @@ class PathSimulation:
         if self.InvalidOperation():
             return
         self.GuiBusy(True)
-        self.timer.start(1)
+        self.timer.start(0)
         self.disableAnim = True
 
     def SimStep(self):
