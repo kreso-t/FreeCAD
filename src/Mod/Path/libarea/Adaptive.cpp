@@ -329,7 +329,7 @@ namespace AdaptivePath {
 		)) return false ; // intersection not within segment1
 		if((d>0) && (
 			p1d<0 || p1d>d || p2d<0 || p2d>d
-		)) return true; // intersection not within segment2
+		)) return false; // intersection not within segment2
 		double t=p1d/d;
 		intersection=IntPoint(long(s1p1.X + S1DX*t), long(s1p1.Y + S1DY*t));
 		return true;
